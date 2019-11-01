@@ -1,0 +1,193 @@
+.\" Man page generated from reStructuredText.
+.
+.TH "RBDMAP" "8" "July 13, 2017" "dev" "Ceph"
+.SH NAME
+rbdmap \- map RBD devices at boot time
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.SH SYNOPSIS
+.nf
+\fBrbdmap map\fP
+\fBrbdmap unmap\fP
+.fi
+.sp
+.SH DESCRIPTION
+.sp
+\fBrbdmap\fP is a shell script that automates \fBrbd map\fP and \fBrbd unmap\fP
+operations on one or more RBD (RADOS Block Device) images. While the script can be
+run manually by the system administrator at any time, the principal use case is
+automatic mapping/mounting of RBD images at boot time (and unmounting/unmapping
+at shutdown), as triggered by the init system (a systemd unit file,
+\fBrbdmap.service\fP is included with the ceph\-common package for this purpose).
+.sp
+The script takes a single argument, which can be either "map" or "unmap".
+In either case, the script parses a configuration file (defaults to \fB/etc/ceph/rbdmap\fP,
+but can be overridden via an environment variable \fBRBDMAPFILE\fP). Each line
+of the configuration file corresponds to an RBD image which is to be mapped, or
+unmapped.
+.sp
+The configuration file format is:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+IMAGESPEC RBDOPTS
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+where \fBIMAGESPEC\fP should be specified as \fBPOOLNAME/IMAGENAME\fP (the pool
+name, a forward slash, and the image name), or merely \fBIMAGENAME\fP, in which
+case the \fBPOOLNAME\fP defaults to "rbd". \fBRBDOPTS\fP is an optional list of
+parameters to be passed to the underlying \fBrbd map\fP command. These parameters
+and their values should be specified as a comma\-separated string:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+PARAM1=VAL1,PARAM2=VAL2,...,PARAMN=VALN
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This will cause the script to issue an \fBrbd map\fP command like the following:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+rbd map POOLNAME/IMAGENAME \-\-PARAM1 VAL1 \-\-PARAM2 VAL2
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+(See the \fBrbd\fP manpage for a full list of possible options.)
+.sp
+When run as \fBrbdmap map\fP, the script parses the configuration file, and for
+each RBD image specified attempts to first map the image (using the \fBrbd map\fP
+command) and, second, to mount the image.
+.sp
+When run as \fBrbdmap unmap\fP, images listed in the configuration file will
+be unmounted and unmapped.
+.sp
+\fBrbdmap unmap\-all\fP attempts to unmount and subsequently unmap all currently
+mapped RBD images, regardless of whether or not they\(aqre listed in the
+configuration file.
+.sp
+If successful, the \fBrbd map\fP operation maps the image to a \fB/dev/rbdX\fP
+device, at which point a udev rule is triggered to create a friendly device
+name symlink, \fB/dev/rbd/POOLNAME/IMAGENAME\fP, pointing to the real mapped
+device.
+.sp
+In order for mounting/unmounting to succeed, the friendly device name must
+have a corresponding entry in \fB/etc/fstab\fP\&.
+.sp
+When writing \fB/etc/fstab\fP entries for RBD images, it\(aqs a good idea to specify
+the "noauto" (or "nofail") mount option. This prevents the init system from
+trying to mount the device too early \- before the device in question even
+exists. (Since \fBrbdmap.service\fP
+executes a shell script, it is typically triggered quite late in the boot
+sequence.)
+.SH EXAMPLES
+.sp
+Example \fB/etc/ceph/rbdmap\fP for two RBD images called "bar1" and "bar2", both
+in pool "foopool":
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+foopool/bar1    id=admin,keyring=/etc/ceph/ceph.client.admin.keyring
+foopool/bar2    id=admin,keyring=/etc/ceph/ceph.client.admin.keyring
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Each line in the file contains two strings: the image spec and the options to
+be passed to \fBrbd map\fP\&. These two lines get transformed into the following
+commands:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+rbd map foopool/bar1 \-\-id admin \-\-keyring /etc/ceph/ceph.client.admin.keyring
+rbd map foopool/bar2 \-\-id admin \-\-keyring /etc/ceph/ceph.client.admin.keyring
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+If the images had XFS filesystems on them, the corresponding \fB/etc/fstab\fP
+entries might look like this:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+/dev/rbd/foopool/bar1 /mnt/bar1 xfs noauto 0 0
+/dev/rbd/foopool/bar2 /mnt/bar2 xfs noauto 0 0
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+After creating the images and populating the \fB/etc/ceph/rbdmap\fP file, making
+the images get automatically mapped and mounted at boot is just a matter of
+enabling that unit:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+systemctl enable rbdmap.service
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SH OPTIONS
+.sp
+None
+.SH AVAILABILITY
+.sp
+\fBrbdmap\fP is part of Ceph, a massively scalable, open\-source, distributed
+storage system. Please refer to the Ceph documentation at
+\fI\%http://ceph.com/docs\fP for more information.
+.SH SEE ALSO
+.sp
+\fBrbd\fP(8),
+.SH COPYRIGHT
+2010-2014, Inktank Storage, Inc. and contributors. Licensed under Creative Commons BY-SA
+.\" Generated by docutils manpage writer.
+.
